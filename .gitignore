@@ -1,0 +1,6 @@
+.idea/
+logs/
+res/
+.mypy_cache/
+INSTALL.md
+README.md
