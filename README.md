@@ -204,7 +204,7 @@ Write a function `parse_session_mode_and_map` that takes an argument `log_data`,
 - `mode`: indicates the multiplayer mode that was played, either `ASSAULT`, `TDM`, or `FFA`;
 - `map`: the name of the map that was used, for instance `mp_surf`.
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log00.txt')
 >>> parse_match_mode_and_map(log_data)
 ('FFA', 'mp_surf')
@@ -263,7 +263,7 @@ For instance, if the Far Cry engine started at `November 09, 2018 12:22:07`, the
 
 Rewrite the function `parse_frags` so that the time of each frag returned is a `datetime.datetime` object with a time zone. For example:
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log00.txt')
 >>> parse_frags(log_data)
 [(datetime.datetime(2018, 11, 9, 12, 26, 32, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=68400))), 'papazark', 'lamonthe', 'AG36'),
@@ -346,7 +346,7 @@ where:
 
 For example:
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log01.txt')
 >>> frags = parse_frags(log_data)
 >>> prettified_frags = prettify_frags(frags)
@@ -456,7 +456,7 @@ Write a function `parse_game_session_start_and_end_times` that takes an argument
 
 For example:
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log04.txt')
 >>> log_start_time = parse_log_start_time(log_data)
 >>> frags = parse_frags(log_data)
@@ -502,7 +502,7 @@ Write a function `write_frag_csv_file` that takes an argument `log_file_pathname
 
 Each frag is represented by a comma-separated value (CSV) string with the following form:
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log04.txt')
 >>> frags = parse_frags(log_data)
 >>> write_frag_csv_file('./logs/log04.csv', frags)
@@ -843,7 +843,7 @@ The function `insert_match_to_sqlite` [inserts](https://www.sqlite.org/lang_inse
 
 The function `insert_match_to_sqlite` returns the identifier of the match that has been inserted. This information is retrieved from the SQLite database using the method [`lastrowid`](https://docs.python.org/3.7/library/sqlite3.html?highlight=lastrowid#sqlite3.Cursor.lastrowid).
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log01.txt')
 >>> log_start_time = parse_log_start_time(log_data)
 >>> game_mode, map_name = parse_match_mode_and_map(log_file_data)
@@ -1631,7 +1631,7 @@ The function `insert_match_to_postgresql` returns the identification of the matc
 
 For example:
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log01.txt')
 >>> log_start_time = parse_log_start_time(log_data)
 >>> game_mode, map_name = parse_match_mode_and_map(log_file_data)
@@ -1998,7 +1998,7 @@ where:
 
 For example:
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log08.txt')
 >>> frags = parse_frags(log_data)
 >>> serial_killers = calculate_serial_killers(frags)
@@ -2092,7 +2092,7 @@ where:
 
 For example:
 
-```python
+```bash
 >>> log_data = read_log_file('./logs/log08.txt')
 >>> frags = parse_frags(log_data)
 >>> serial_losers = calculate_serial_losers(frags)
