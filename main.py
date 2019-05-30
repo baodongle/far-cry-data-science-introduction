@@ -5,12 +5,49 @@ from pathlib import PurePath
 from re import findall, search
 from typing import List, Optional, Sequence, Tuple, Union
 
+# RegEx Patterns:
 START_TIME_PATTERN = r'Log Started at (\w+, \w+ \d{2}, \d{4} ' \
                      r'\d{2}:\d{2}:\d{2})'
 TIME_ZONE_PATTERN = r'cvar: \(g_timezone,(-?\d)'
 LOADING_LEVEL_PATTERN = r'Loading level Levels\/(\w+), mission (\w+)'
 FRAG_PATTERN = r'<([0-5][0-9]):([0-5][0-9])> <\w+> ([\w+ ]*) killed ' \
                r'(?:itself|([\w+ ]*) with (\w+))'
+
+# Emojis:
+BLUE_CAR = "🚙"
+GUN = "🔫"
+BOMB = "💣"
+ROCKET = "🚀"
+KNIFE = "🔪"
+SPEEDBOAT = "🚤"
+STUCK_OUT_TONGUE = "😛"
+FROWNING = "😦"
+SKULL_AND_CROSSBONES = "☠"
+
+# Weapon Codes with Emojis:
+WEAPONS_DICT = {
+    "Vehicle": BLUE_CAR,
+    "Falcon": GUN,
+    "Shotgun": GUN,
+    "P90": GUN,
+    "MP5": GUN,
+    "M4": GUN,
+    "AG36": GUN,
+    "OICW": GUN,
+    "SniperRifle": GUN,
+    "M249": GUN,
+    "VehicleMountedAutoMG": GUN,
+    "VehicleMountedMG": GUN,
+    "HandGrenade": BOMB,
+    "AG36Grenade": BOMB,
+    "OICWGrenade": BOMB,
+    "StickyExplosive": BOMB,
+    "Rocket": ROCKET,
+    "VehicleMountedRocketMG": ROCKET,
+    "VehicleRocket": ROCKET,
+    "Machete": KNIFE,
+    "Boat": SPEEDBOAT
+}
 
 
 # Waypoint 1:
@@ -111,8 +148,40 @@ def parse_frags(log_data: str) -> List[Tuple[datetime, str]]:
     return frags
 
 
+# Waypoint 7:
+def prettify_frags(frags: List[Tuple[datetime, str]]) -> List[str]:
+    """Prettify Frag History.
+
+    Args:
+        frags: An array of tuples of frags parsed from a Far Cry server's
+               log file
+
+    Returns: A list of strings, each with a specified format.
+
+    """
+    strings = []
+    for frag in frags:
+        try:
+            if len(frag) == 2:
+                strings.append('[{}] {} {} {}'
+                               .format(frag[0].isoformat(), FROWNING,
+                                       frag[1], SKULL_AND_CROSSBONES))
+            elif len(frag) == 4:
+                strings.append('[{}] {} {} {} {} {}'
+                               .format(frag[0].isoformat(), STUCK_OUT_TONGUE,
+                                       frag[1], WEAPONS_DICT.get(frag[3]),
+                                       FROWNING, frag[2]))
+        except ValueError as e:
+            error(e, exc_info=True)
+            continue
+    return strings
+
+
 if __name__ == '__main__':
-    log = read_log_file('./logs/log00.txt')
+    log = read_log_file('./logs/log01.txt')
     start = parse_log_start_time(log)
     mode, map = parse_match_mode_and_map(log)
-    print(repr((parse_frags(log))))
+    frags = parse_frags(log)
+    prettified_frags = prettify_frags(frags)
+    print('\n'.join(prettified_frags))
+    # print(repr((parse_frags(log))))
