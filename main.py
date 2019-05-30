@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from logging import error
 from pathlib import PurePath
+from re import search
 from typing import Optional, Union
+
+START_TIME_PATTERN = r'Log Started at (\w+, \w+ \d{2}, \d{4} ' \
+                     r'\d{2}:\d{2}:\d{2})'
+TIME_ZONE_PATTERN = r'cvar: \(g_timezone,(-?\d)'
 
 
 # Waypoint 1:
-def read_log_file(log_file_pathname: Union[str, bytes, PurePath]) -> bytes:
+def read_log_file(log_file_pathname: Union[str, bytes, PurePath]) -> str:
     """Read Game Session Log File.
 
     Args:
@@ -15,21 +21,15 @@ def read_log_file(log_file_pathname: Union[str, bytes, PurePath]) -> bytes:
 
     """
     try:
-        with open(log_file_pathname, 'rb') as f:
+        with open(log_file_pathname) as f:
             return f.read()
-    except OSError:
-        return b''
-
-
-def parse_log_variables(log_data: bytes):
-    try:
-        log_data_lines = log_data.decode().splitlines()
-    except Exception:
-        pass
+    except OSError as e:
+        error(e, exc_info=True)
+        return ''
 
 
 # Waypoint 2, 3:
-def parse_log_start_time(log_data: bytes) -> Optional[datetime]:
+def parse_log_start_time(log_data: str) -> Optional[datetime]:
     """Parse Far Cry Engine's Start Time.
 
     Args:
@@ -39,15 +39,19 @@ def parse_log_start_time(log_data: bytes) -> Optional[datetime]:
 
     """
     try:
-        log_data_lines = log_data.decode().splitlines()
-        latter = log_data_lines[0]
-        start_time = datetime.strptime(latter[15:], '%A, %B %d, %Y %H:%M:%S')
+        start_time_log = search(START_TIME_PATTERN, log_data)
+        start_time = datetime.strptime(start_time_log.group(1),
+                                       '%A, %B %d, %Y %H:%M:%S')
 
-        return start_time
-    except (ValueError, LookupError):
+        timezone_log = search(TIME_ZONE_PATTERN, log_data)
+        tzinfo = timezone(timedelta(hours=int(timezone_log.group(1))))
+        return start_time.replace(tzinfo=tzinfo)
+    except (ValueError, LookupError, AttributeError) as e:
+        error(e, exc_info=True)
         return None
 
 
 if __name__ == '__main__':
-    log = read_log_file('./logs/log00.txt')
-    parse_log_start_time(log)
+    log = read_log_file('./logs/log.txt')
+    start = parse_log_start_time(log)
+    print(repr(start))
