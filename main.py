@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 from datetime import datetime, timedelta, timezone
-from logging import error, warning
+from logging import basicConfig, DEBUG, error, warning
 from pathlib import PurePath
-from re import findall, search
-from typing import List, Optional, Sequence, Tuple, Union
+from re import compile as re_compile, findall, M, search
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 # RegEx Patterns:
-START_TIME_PATTERN = r'Log Started at (\w+, \w+ \d{2}, \d{4} ' \
-                     r'\d{2}:\d{2}:\d{2})'
+START_TIME_PATTERN = r'^Log Started at (\w+, \w+ \d{2}, \d{4} ' \
+                     r'\d{2}:\d{2}:\d{2})$'
 TIME_ZONE_PATTERN = r'cvar: \(g_timezone,(-?\d)'
 LOADING_LEVEL_PATTERN = r'Loading level Levels\/(\w+), mission (\w+)'
-FRAG_PATTERN = r'<([0-5][0-9]):([0-5][0-9])> <\w+> ([\w+ ]*) killed ' \
-               r'(?:itself|([\w+ ]*) with (\w+))'
+FRAG_PATTERN = r'^<([0-5][0-9]):([0-5][0-9])> <\w+> ([\w+ ]*) killed ' \
+               r'(?:itself|([\w+ ]*) with (\w+))$'
+LEVEL_LOADED_PATTERN = r'^<([0-5][0-9]):([0-5][0-9])>  Level \w+ loaded in ' \
+                       r'[-+]?[0-9]*\.?[0-9]+ seconds$'
+STATISTICS_PATTERN = r'^<([0-5][0-9]):([0-5][0-9])> == Statistics'
 
 # Emojis:
 BLUE_CAR = "🚙"
@@ -36,6 +39,7 @@ WEAPONS_DICT = {
     "OICW": GUN,
     "SniperRifle": GUN,
     "M249": GUN,
+    "MG": GUN,
     "VehicleMountedAutoMG": GUN,
     "VehicleMountedMG": GUN,
     "HandGrenade": BOMB,
@@ -79,14 +83,14 @@ def parse_log_start_time(log_data: str) -> Optional[datetime]:
 
     """
     try:
-        start_time_log = search(START_TIME_PATTERN, log_data)
-        timezone_log = search(TIME_ZONE_PATTERN, log_data)
+        start_time_log = search(START_TIME_PATTERN, log_data, M)
         if start_time_log:
             start_time = datetime.strptime(start_time_log.group(1),
                                            '%A, %B %d, %Y %H:%M:%S')
         else:
             warning("Something occurred with the log file!")
             return None
+        timezone_log = search(TIME_ZONE_PATTERN, log_data)
         if timezone_log:
             tzinfo = timezone(timedelta(hours=int(timezone_log.group(1))))
             return start_time.replace(tzinfo=tzinfo)
@@ -109,15 +113,15 @@ def parse_match_mode_and_map(log_data: str) -> Sequence[str]:
              map: the name of the map that was used, for instance mp_surf.
 
     """
-    match = search(LOADING_LEVEL_PATTERN, log_data)
-    if match:
-        return match.groups()
+    found = search(LOADING_LEVEL_PATTERN, log_data, M)
+    if found:
+        return found.groups()[::-1]
     warning("Something occurred with the log file!")
     return '', ''
 
 
 # Waypoint 5, 6:
-def parse_frags(log_data: str) -> List[Tuple[datetime, str]]:
+def parse_frags(log_data: str) -> List[Tuple[datetime, Any]]:
     """Parse Frag History.
 
     Args:
@@ -129,7 +133,7 @@ def parse_frags(log_data: str) -> List[Tuple[datetime, str]]:
     frags = []
     frag_time = parse_log_start_time(log_data)
     if frag_time:
-        matches = findall(FRAG_PATTERN, log_data)
+        matches = findall(FRAG_PATTERN, log_data, M)
         for i, frag in enumerate(matches):
             frag_min = int(frag[0])
             frag_sec = int(frag[1])
@@ -149,12 +153,12 @@ def parse_frags(log_data: str) -> List[Tuple[datetime, str]]:
 
 
 # Waypoint 7:
-def prettify_frags(frags: List[Tuple[datetime, str]]) -> List[str]:
+def prettify_frags(frags: List[Tuple[datetime, Any]]) -> List[str]:
     """Prettify Frag History.
 
     Args:
         frags: An array of tuples of frags parsed from a Far Cry server's
-               log file
+               log file.
 
     Returns: A list of strings, each with a specified format.
 
@@ -164,24 +168,94 @@ def prettify_frags(frags: List[Tuple[datetime, str]]) -> List[str]:
         try:
             if len(frag) == 2:
                 strings.append('[{}] {} {} {}'
-                               .format(frag[0].isoformat(), FROWNING,
-                                       frag[1], SKULL_AND_CROSSBONES))
+                               .format(frag[0], FROWNING, frag[1],
+                                       SKULL_AND_CROSSBONES))
             elif len(frag) == 4:
                 strings.append('[{}] {} {} {} {} {}'
-                               .format(frag[0].isoformat(), STUCK_OUT_TONGUE,
+                               .format(frag[0], STUCK_OUT_TONGUE,
                                        frag[1], WEAPONS_DICT.get(frag[3]),
                                        FROWNING, frag[2]))
         except ValueError as e:
-            error(e, exc_info=True)
+            error('{} raised {}'.format(frag[0], e))
             continue
     return strings
 
 
+# Waypoint 8:
+def parse_game_session_start_and_end_times(log_data: str,
+                                           log_start: Optional[datetime],
+                                           frags: List[Tuple[datetime, Any]]) \
+        -> Sequence[Optional[datetime]]:
+    """Determine Game Session's Start and End Times.
+
+    Args:
+        log_data: The data read from a Far Cry server's log file.
+        log_start: The time the Far Cry engine began to log events.
+        frags:
+
+    Returns: The approximate start and end time of the game session.
+
+    """
+    start_time, end_time = None, None
+    if log_start:
+        start_time = _parse_start_time(log_data, log_start)
+    if frags:
+        last_frag_time = frags[-1][0]
+        end_time = _parse_end_time(log_data, last_frag_time)
+    return start_time, end_time
+
+
+def _parse_start_time(data: str, start: datetime) -> Optional[datetime]:
+    """Get the game session's start time."""
+    level_loaded_match = search(LEVEL_LOADED_PATTERN, data, M)
+    if level_loaded_match:
+        minute, second = level_loaded_match.groups()
+        start_time = start.replace(minute=int(minute),
+                                   second=int(second))
+        # When the logged time reaches 59:59, it is reset to 00:00.
+        if start_time.minute < start.minute:
+            start_time += timedelta(hours=1)
+        return start_time
+    warning("Something occurred with the data!")
+    return None
+
+
+def _parse_end_time(data: str, start: datetime) -> Optional[datetime]:
+    """Get the game session's end time."""
+    minute, second = None, None
+    statistic_match = search(STATISTICS_PATTERN, data, M)
+    if statistic_match:
+        minute, second = statistic_match.groups()
+    else:
+        last_frag = search(FRAG_PATTERN + r'$', data)
+        if last_frag:
+            time_after_frags = re_compile(r'^<([0-5][0-9]):([0-5][0-9])>') \
+                .match(data, last_frag.end())
+            if time_after_frags:
+                minute, second = time_after_frags.groups()
+    if minute and second:
+        end_time = start.replace(minute=int(minute),
+                                 second=int(second))
+        # When the logged time reaches 59:59, it is reset to 00:00.
+        if end_time.minute < start.minute:
+            end_time += timedelta(hours=1)
+        return end_time
+    warning("Something occurred with the data!")
+    return None
+
+
+def main() -> None:
+    # Do basic configuration for the logging system:
+    basicConfig(level=DEBUG,
+                format="%(levelname)s: %(funcName)s():%(lineno)i: %(message)s")
+    # Running:
+    log_data = read_log_file('./logs/log04.txt')
+    log_start_time = parse_log_start_time(log_data)
+    frags = parse_frags(log_data)
+    start_time, end_time = parse_game_session_start_and_end_times(
+        log_data, log_start_time, frags)
+    print(str(start_time), str(end_time))
+
+
 if __name__ == '__main__':
-    log = read_log_file('./logs/log01.txt')
-    start = parse_log_start_time(log)
-    mode, map = parse_match_mode_and_map(log)
-    frags = parse_frags(log)
-    prettified_frags = prettify_frags(frags)
-    print('\n'.join(prettified_frags))
-    # print(repr((parse_frags(log))))
+    main()
