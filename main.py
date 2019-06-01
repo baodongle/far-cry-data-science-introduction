@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
+from csv import writer
 from datetime import datetime, timedelta, timezone
 from logging import basicConfig, DEBUG, error, warning
-from pathlib import PurePath
 from re import compile as re_compile, findall, M, search
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple
 
 # RegEx Patterns:
 START_TIME_PATTERN = r'^Log Started at (\w+, \w+ \d{2}, \d{4} ' \
@@ -55,7 +55,7 @@ WEAPONS_DICT = {
 
 
 # Waypoint 1:
-def read_log_file(log_file_pathname: Union[str, bytes, PurePath]) -> str:
+def read_log_file(log_file_pathname: Any) -> str:
     """Read Game Session Log File.
 
     Args:
@@ -229,7 +229,7 @@ def _parse_end_time(data: str, start: datetime) -> Optional[datetime]:
     else:
         last_frag = search(FRAG_PATTERN + r'$', data)
         if last_frag:
-            time_after_frags = re_compile(r'^<([0-5][0-9]):([0-5][0-9])>') \
+            time_after_frags = re_compile('^<([0-5][0-9]):([0-5][0-9])>') \
                 .match(data, last_frag.end())
             if time_after_frags:
                 minute, second = time_after_frags.groups()
@@ -244,17 +244,38 @@ def _parse_end_time(data: str, start: datetime) -> Optional[datetime]:
     return None
 
 
+# Waypoint 9:
+def write_frag_csv_file(log_file_pathname: Any,
+                        frags: List[Tuple[datetime, Any]]) -> None:
+    """Create Frag History CSV File.
+
+    Args:
+        log_file_pathname: The pathname of the CSV file to store the frags in
+        frags: An array of tuples of the frags.
+
+    """
+    try:
+        with open(log_file_pathname, 'w') as f:
+            csv_writer = writer(f, lineterminator='\n')
+            csv_writer.writerows(frags)
+    except OSError as e:
+        error(e, exc_info=True)
+
+
 def main() -> None:
     # Do basic configuration for the logging system:
     basicConfig(level=DEBUG,
                 format="%(levelname)s: %(funcName)s():%(lineno)i: %(message)s")
     # Running:
     log_data = read_log_file('./logs/log04.txt')
-    log_start_time = parse_log_start_time(log_data)
+    # log_start_time = parse_log_start_time(log_data)
     frags = parse_frags(log_data)
-    start_time, end_time = parse_game_session_start_and_end_times(
-        log_data, log_start_time, frags)
-    print(str(start_time), str(end_time))
+    # prettified_frags = prettify_frags(frags)
+    # print('\n'.join(prettified_frags))
+    # start_time, end_time = parse_game_session_start_and_end_times(
+    #     log_data, log_start_time, frags)
+    # print(str(start_time), str(end_time))
+    write_frag_csv_file('./logs/log04.csv', frags)
 
 
 if __name__ == '__main__':
