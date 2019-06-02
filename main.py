@@ -3,6 +3,7 @@ from csv import writer
 from datetime import datetime, timedelta, timezone
 from logging import basicConfig, DEBUG, error, warning
 from re import compile as re_compile, findall, M, search
+from sqlite3 import connect, Connection, DatabaseError
 from typing import Any, List, Optional, Sequence, Tuple
 
 # RegEx Patterns:
@@ -191,7 +192,7 @@ def parse_game_session_start_and_end_times(log_data: str,
     Args:
         log_data: The data read from a Far Cry server's log file.
         log_start: The time the Far Cry engine began to log events.
-        frags:
+        frags: A list of tuples of the frags.
 
     Returns: The approximate start and end time of the game session.
 
@@ -262,20 +263,84 @@ def write_frag_csv_file(log_file_pathname: Any,
         error(e, exc_info=True)
 
 
+# Waypoint 25:
+def insert_match_to_sqlite(file_pathname: Any, start_time: datetime,
+                           end_time: datetime,
+                           game_mode: str,
+                           map_name: str,
+                           frags: List[Tuple[datetime, Any]]) -> int:
+    """Insert Game Session Data into SQLite.
+
+    Args:
+        file_pathname: The path and name of the Far Cry's SQLite database.
+        start_time: The start of the game session.
+        end_time: The end of the game session.
+        game_mode: Multi-player mode of the game session.
+        map_name: Name of the map that was played.
+        frags: A list of tuples of the frags.
+
+    Returns: The identifier of the match that has been inserted.
+
+    """
+    insert_statement = "INSERT INTO match (start_time, end_time, game_mode, " \
+                       "map_name) VALUES (?,?,?,?)"
+    try:
+        with connect(file_pathname) as conn:
+            cur = conn.cursor()
+            cur.execute(insert_statement,
+                        (start_time, end_time, game_mode, map_name))
+            insert_frags_to_sqlite(conn, cur.lastrowid, frags)
+            return cur.lastrowid
+    except DatabaseError as e:
+        error(e, exc_info=True)
+    return 0
+
+
+# Waypoint 26:
+def insert_frags_to_sqlite(connection: Connection, match_id: int,
+                           frags: List[Tuple[datetime, Any]]) -> None:
+    """Insert Match Frags into SQLite.
+
+     This function inserts new records into the table match_frag.
+
+    Args:
+        connection: A sqlite3 Connection object.
+        match_id: The identifier of a match.
+        frags: a list of frags.
+
+    """
+    cur = connection.cursor()
+    for frag in frags:
+        if len(frag) > 2:
+            cur.execute(
+                "INSERT INTO match_frag (match_id, frag_time, killer_name, "
+                "victim_name, weapon_code) VALUES (?,?,?,?,?)",
+                (match_id, *frag))
+        else:
+            cur.execute(
+                "INSERT INTO match_frag (match_id, frag_time, killer_name) "
+                "VALUES (?,?,?)", (match_id, *frag))
+
+
 def main() -> None:
+    """Running and Testing."""
     # Do basic configuration for the logging system:
     basicConfig(level=DEBUG,
                 format="%(levelname)s: %(funcName)s():%(lineno)i: %(message)s")
     # Running:
     log_data = read_log_file('./logs/log04.txt')
-    # log_start_time = parse_log_start_time(log_data)
+    log_start_time = parse_log_start_time(log_data)
+    game_mode, map_name = parse_match_mode_and_map(log_data)
     frags = parse_frags(log_data)
     # prettified_frags = prettify_frags(frags)
     # print('\n'.join(prettified_frags))
-    # start_time, end_time = parse_game_session_start_and_end_times(
-    #     log_data, log_start_time, frags)
-    # print(str(start_time), str(end_time))
-    write_frag_csv_file('./logs/log04.csv', frags)
+    start_time, end_time = parse_game_session_start_and_end_times(
+        log_data, log_start_time, frags)
+    if start_time and end_time:
+        # print(str(start_time), str(end_time))
+        # write_frag_csv_file('./logs/log04.csv', frags)
+        print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
+                                     game_mode, map_name, frags))
 
 
 if __name__ == '__main__':
