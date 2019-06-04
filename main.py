@@ -12,7 +12,7 @@ START_TIME_PATTERN = r'^Log Started at (\w+, \w+ \d{2}, \d{4} ' \
 TIME_ZONE_PATTERN = r'cvar: \(g_timezone,(-?\d)'
 LOADING_LEVEL_PATTERN = r'Loading level Levels\/(\w+), mission (\w+)'
 FRAG_PATTERN = r'^<([0-5][0-9]):([0-5][0-9])> <\w+> ([\w+ ]*) killed ' \
-               r'(?:itself|([\w+ ]*) with (\w+))$'
+               r'(?:itself|([\w+ ]*) with (\w+))'
 LEVEL_LOADED_PATTERN = r'^<([0-5][0-9]):([0-5][0-9])>  Level \w+ loaded in ' \
                        r'[-+]?[0-9]*\.?[0-9]+ seconds$'
 STATISTICS_PATTERN = r'^<([0-5][0-9]):([0-5][0-9])> == Statistics'
@@ -228,10 +228,10 @@ def _parse_end_time(data: str, start: datetime) -> Optional[datetime]:
     if statistic_match:
         minute, second = statistic_match.groups()
     else:
-        last_frag = search(FRAG_PATTERN + r'$', data)
+        last_frag = search(FRAG_PATTERN, data, M)
         if last_frag:
-            time_after_frags = re_compile('^<([0-5][0-9]):([0-5][0-9])>') \
-                .match(data, last_frag.end())
+            time_after_frags = re_compile('<([0-5][0-9]):([0-5][0-9])>') \
+                .match(data, last_frag.end() + 1)
             if time_after_frags:
                 minute, second = time_after_frags.groups()
     if minute and second:
@@ -328,19 +328,30 @@ def main() -> None:
     basicConfig(level=DEBUG,
                 format="%(levelname)s: %(funcName)s():%(lineno)i: %(message)s")
     # Running:
-    log_data = read_log_file('./logs/log04.txt')
-    log_start_time = parse_log_start_time(log_data)
-    game_mode, map_name = parse_match_mode_and_map(log_data)
-    frags = parse_frags(log_data)
-    # prettified_frags = prettify_frags(frags)
-    # print('\n'.join(prettified_frags))
-    start_time, end_time = parse_game_session_start_and_end_times(
-        log_data, log_start_time, frags)
-    if start_time and end_time:
-        # print(str(start_time), str(end_time))
-        # write_frag_csv_file('./logs/log04.csv', frags)
-        print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
-                                     game_mode, map_name, frags))
+    files = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10',
+             '11']
+    for f in files:
+        log_data = read_log_file('./logs/log' + f + '.txt')
+        log_start_time = parse_log_start_time(log_data)
+        game_mode, map_name = parse_match_mode_and_map(log_data)
+        frags = parse_frags(log_data)
+        # prettified_frags = prettify_frags(frags)
+        # print('\n'.join(prettified_frags))
+        start_time, end_time = parse_game_session_start_and_end_times(
+            log_data, log_start_time, frags)
+        if start_time and end_time:
+            # print(str(start_time), str(end_time))
+            # write_frag_csv_file('./logs/log04.csv', frags)
+            print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
+                                         game_mode, map_name, frags))
+    # log_data = read_log_file('./logs/log01.txt')
+    # log_start_time = parse_log_start_time(log_data)
+    # # game_mode, map_name = parse_match_mode_and_map(log_data)
+    # frags = parse_frags(log_data)
+    # # prettified_frags = prettify_frags(frags)
+    # # print('\n'.join(prettified_frags))
+    # print(parse_game_session_start_and_end_times(
+    #     log_data, log_start_time, frags))
 
 
 if __name__ == '__main__':

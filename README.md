@@ -1019,7 +1019,7 @@ COUNT(*)
 
 # Waypoint 33: Calculate the number of Kills and Suicides
 
-Write a SQL query that returns the total number of kills and suicides. [Alias](res/<https://en.wikipedia.org/wiki/Alias_(SQL)>) the returned value with the name `kill_suicide_count`.
+Write a SQL query that returns the total number of kills and suicides. [Alias](https://en.wikipedia.org/wiki/Alias_(SQL)) the returned value with the name `kill_suicide_count`.
 
 For example:
 
@@ -1031,7 +1031,7 @@ kill_suicide_count
 
 # Waypoint 34: Calculate the Number of Suicides
 
-Write a SQL query that returns the total number of suicides. [Only count](res/<https://en.wikipedia.org/wiki/Where_(SQL)>) frags that have no victim, meaning that `victim_name` is `NULL`. Alias the returned value with the name `suicide_count`.
+Write a SQL query that returns the total number of suicides. [Only count](https://en.wikipedia.org/wiki/Where_(SQL)) frags that have no victim, meaning that `victim_name` is `NULL`. Alias the returned value with the name `suicide_count`.
 
 For example:
 
