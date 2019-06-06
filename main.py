@@ -3,8 +3,11 @@ from csv import writer
 from datetime import datetime, timedelta, timezone
 from logging import basicConfig, DEBUG, error, warning
 from re import compile as re_compile, findall, M, search
-from sqlite3 import connect, Connection, DatabaseError
+from sqlite3 import connect as sqlite_connect, Connection, \
+    DatabaseError as sqlite_DatabaseError
 from typing import Any, List, Optional, Sequence, Tuple
+
+from psycopg2 import connect as pg_connect, DatabaseError as pg_DatabaseError
 
 # RegEx Patterns:
 START_TIME_PATTERN = r'^Log Started at (\w+, \w+ \d{2}, \d{4} ' \
@@ -74,7 +77,7 @@ def read_log_file(log_file_pathname: Any) -> str:
 
 
 # Waypoint 2, 3:
-def parse_log_start_time(log_data: str) -> Optional[datetime]:
+def parse_log_start_time(log_data: str) -> datetime:
     """Parse Far Cry Engine's Start Time.
 
     Args:
@@ -90,7 +93,7 @@ def parse_log_start_time(log_data: str) -> Optional[datetime]:
                                            '%A, %B %d, %Y %H:%M:%S')
         else:
             warning("Something occurred with the log file!")
-            return None
+            raise
         timezone_log = search(TIME_ZONE_PATTERN, log_data)
         if timezone_log:
             tzinfo = timezone(timedelta(hours=int(timezone_log.group(1))))
@@ -98,7 +101,7 @@ def parse_log_start_time(log_data: str) -> Optional[datetime]:
         return start_time
     except (ValueError, LookupError) as e:
         error(e, exc_info=True)
-        return None
+        raise
 
 
 # Waypoint 4:
@@ -183,10 +186,10 @@ def prettify_frags(frags: List[Tuple[datetime, Any]]) -> List[str]:
 
 
 # Waypoint 8:
-def parse_game_session_start_and_end_times(log_data: str,
-                                           log_start: Optional[datetime],
-                                           frags: List[Tuple[datetime, Any]]) \
-        -> Sequence[Optional[datetime]]:
+def parse_match_start_and_end_times(log_data: str,
+                                    log_start: datetime,
+                                    frags: List[Tuple[datetime, Any]]) \
+        -> Sequence[datetime]:
     """Determine Game Session's Start and End Times.
 
     Args:
@@ -197,16 +200,13 @@ def parse_game_session_start_and_end_times(log_data: str,
     Returns: The approximate start and end time of the game session.
 
     """
-    start_time, end_time = None, None
-    if log_start:
-        start_time = _parse_start_time(log_data, log_start)
-    if frags:
-        last_frag_time = frags[-1][0]
-        end_time = _parse_end_time(log_data, last_frag_time)
+    start_time = _parse_start_time(log_data, log_start)
+    last_frag_time = frags[-1][0]
+    end_time = _parse_end_time(log_data, last_frag_time)
     return start_time, end_time
 
 
-def _parse_start_time(data: str, start: datetime) -> Optional[datetime]:
+def _parse_start_time(data: str, start: datetime) -> datetime:
     """Get the game session's start time."""
     level_loaded_match = search(LEVEL_LOADED_PATTERN, data, M)
     if level_loaded_match:
@@ -218,10 +218,10 @@ def _parse_start_time(data: str, start: datetime) -> Optional[datetime]:
             start_time += timedelta(hours=1)
         return start_time
     warning("Something occurred with the data!")
-    return None
+    raise
 
 
-def _parse_end_time(data: str, start: datetime) -> Optional[datetime]:
+def _parse_end_time(data: str, start: datetime) -> datetime:
     """Get the game session's end time."""
     minute, second = None, None
     statistic_match = search(STATISTICS_PATTERN, data, M)
@@ -242,7 +242,7 @@ def _parse_end_time(data: str, start: datetime) -> Optional[datetime]:
             end_time += timedelta(hours=1)
         return end_time
     warning("Something occurred with the data!")
-    return None
+    raise
 
 
 # Waypoint 9:
@@ -282,16 +282,16 @@ def insert_match_to_sqlite(file_pathname: Any, start_time: datetime,
     Returns: The identifier of the match that has been inserted.
 
     """
-    insert_statement = "INSERT INTO match (start_time, end_time, game_mode, " \
-                       "map_name) VALUES (?,?,?,?)"
+    insert_statement = '''INSERT INTO match (start_time, end_time, game_mode, 
+    map_name) VALUES (?,?,?,?)'''
     try:
-        with connect(file_pathname) as conn:
+        with sqlite_connect(file_pathname) as conn:
             cur = conn.cursor()
             cur.execute(insert_statement,
                         (start_time, end_time, game_mode, map_name))
             insert_frags_to_sqlite(conn, cur.lastrowid, frags)
             return cur.lastrowid
-    except DatabaseError as e:
+    except sqlite_DatabaseError as e:
         error(e, exc_info=True)
     return 0
 
@@ -312,14 +312,89 @@ def insert_frags_to_sqlite(connection: Connection, match_id: int,
     cur = connection.cursor()
     for frag in frags:
         if len(frag) > 2:
-            cur.execute(
-                "INSERT INTO match_frag (match_id, frag_time, killer_name, "
-                "victim_name, weapon_code) VALUES (?,?,?,?,?)",
-                (match_id, *frag))
+            cur.execute("""INSERT INTO match_frag (match_id, frag_time, 
+            killer_name, victim_name, weapon_code) VALUES (?,?,?,?,?)""",
+                        (match_id, *frag))
         else:
             cur.execute(
-                "INSERT INTO match_frag (match_id, frag_time, killer_name) "
-                "VALUES (?,?,?)", (match_id, *frag))
+                """INSERT INTO match_frag (match_id, frag_time, killer_name) 
+                VALUES (?,?,?)""", (match_id, *frag))
+
+
+# Waypoint 48:
+def insert_match_to_postgresql(properties: Sequence[Optional[str]],
+                               start_time: datetime,
+                               end_time: datetime,
+                               game_mode: str,
+                               map_name: str,
+                               frags: List[Tuple[datetime, Any]]) -> str:
+    """Insert Game Session Data to PostgreSQL Database.
+
+    This function inserts a new record into the table `match` with the
+    arguments start_time, end_time, game_mode, and map_name, using an
+    INSERT statement.
+
+    This function inserts all the frags into the table `match_frag`.
+
+    Args:
+        properties: A tuple of the following form:
+                    (hostname, database_name, username, password)
+                    where:
+                        - hostname: hostname of the PosgtreSQL server to
+                        connect to;
+                        - database_name: name of the database to use;
+                        - username: username of the database account on which
+                        the connection is being made;
+                        - password: password of the database account.
+        start_time: A datetime.datetime object with time zone information
+                    corresponding to the start of the game session;
+        end_time:   A datetime.datetime object with time zone information
+                    corresponding to the end of the game session;
+        game_mode:  Multi-player mode of the game session;
+        map_name:   Name of the map that was played;
+        frags:      A list of tuples in the following form:
+                    (frag_time, killer_name[, victim_name, weapon_code])
+                    where:
+                        - frag_time (required): datetime.datetime with time
+                        zone when the frag occurred;
+                        - killer_name (required): username of the player who
+                        fragged another or killed himself;
+                        - victim_name (optional): username of the player who
+                        has been fragged;
+                        - weapon_code (optional): code of the weapon that was
+                        used to frag.
+
+    Returns: The identification of the match that has been inserted.
+
+    """
+    connection_string = "host={} dbname={} user={} password={}" \
+        .format(*(i if i else "''" for i in properties))
+    try:
+        with pg_connect(connection_string) as conn:
+            # Open a cursor to perform database operations
+            with conn.cursor() as curs:
+                # inserts a new record into the table `match`
+                curs.execute("""INSERT INTO match (start_time, end_time, 
+                game_mode, map_name) VALUES (%s, %s, %s, %s)
+                RETURNING match_id""",
+                             (start_time, end_time, game_mode, map_name))
+                match_id = curs.fetchone()[0]
+                if match_id:
+                    # Inserts all the frags into the table `match_frag`
+                    for frag in frags:
+                        if len(frag) == 2:
+                            curs.execute("""INSERT INTO match_frag (match_id,
+                            frag_time, killer_name) VALUES (%s, %s, %s)""",
+                                         (match_id, *frag))
+                        if len(frag) == 4:
+                            curs.execute("""INSERT INTO match_frag (match_id, 
+                            frag_time, killer_name, victim_name, weapon_code)
+                             VALUES (%s, %s, %s, %s, %s)""", (match_id, *frag))
+                    return match_id
+                return ''
+    except (pg_DatabaseError, TypeError) as exc:
+        error("{}: {}".format(exc.__class__.__name__, exc))
+        raise
 
 
 def main() -> None:
@@ -328,8 +403,9 @@ def main() -> None:
     basicConfig(level=DEBUG,
                 format="%(levelname)s: %(funcName)s():%(lineno)i: %(message)s")
     # Running:
-    files = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10',
-             '11']
+    properties = ('localhost', 'farcry', None, None)
+    files = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09',
+             '10', '11']
     for f in files:
         log_data = read_log_file('./logs/log' + f + '.txt')
         log_start_time = parse_log_start_time(log_data)
@@ -337,21 +413,27 @@ def main() -> None:
         frags = parse_frags(log_data)
         # prettified_frags = prettify_frags(frags)
         # print('\n'.join(prettified_frags))
-        start_time, end_time = parse_game_session_start_and_end_times(
+        start_time, end_time = parse_match_start_and_end_times(
             log_data, log_start_time, frags)
         if start_time and end_time:
             # print(str(start_time), str(end_time))
             # write_frag_csv_file('./logs/log04.csv', frags)
-            print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
-                                         game_mode, map_name, frags))
+            # print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
+            #                              game_mode, map_name, frags))
+            print(insert_match_to_postgresql(properties, start_time, end_time,
+                                             game_mode, map_name, frags))
     # log_data = read_log_file('./logs/log01.txt')
     # log_start_time = parse_log_start_time(log_data)
-    # # game_mode, map_name = parse_match_mode_and_map(log_data)
+    # game_mode, map_name = parse_match_mode_and_map(log_data)
     # frags = parse_frags(log_data)
     # # prettified_frags = prettify_frags(frags)
     # # print('\n'.join(prettified_frags))
-    # print(parse_game_session_start_and_end_times(
-    #     log_data, log_start_time, frags))
+    # start_time, end_time = parse_match_start_and_end_times(log_data,
+    #                                                        log_start_time,
+    #                                                        frags)
+    # properties = ('localhost', 'farcry', None, None)
+    # print(insert_match_to_postgresql(properties, start_time, end_time,
+    #                                  game_mode, map_name, frags))
 
 
 if __name__ == '__main__':
