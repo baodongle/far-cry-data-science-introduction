@@ -5,7 +5,7 @@ from logging import basicConfig, DEBUG, error, warning
 from re import compile as re_compile, findall, M, search
 from sqlite3 import connect as sqlite_connect, Connection, \
     DatabaseError as sqlite_DatabaseError
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from psycopg2 import connect as pg_connect, DatabaseError as pg_DatabaseError
 
@@ -306,7 +306,7 @@ def insert_frags_to_sqlite(connection: Connection, match_id: int,
     Args:
         connection: A sqlite3 Connection object.
         match_id: The identifier of a match.
-        frags: a list of frags.
+        frags: A list of frags.
 
     """
     cur = connection.cursor()
@@ -397,6 +397,22 @@ def insert_match_to_postgresql(properties: Sequence[Optional[str]],
         raise
 
 
+# Waypoint 53:
+def calculate_serial_killers(frags: List[Tuple[datetime, Any]]) \
+        -> Dict[str, Sequence[str]]:
+    """Determine Serial Killers.
+
+    Args:
+        frags: A list of frags.
+
+    Returns: A dictionary of killers with their longest kill series, where the
+             key corresponds to the name of a player and the value corresponds
+             to a list of frag times which contain the player's longest series.
+
+    """
+
+
+
 def main() -> None:
     """Running and Testing."""
     # Do basic configuration for the logging system:
@@ -431,7 +447,6 @@ def main() -> None:
     # start_time, end_time = parse_match_start_and_end_times(log_data,
     #                                                        log_start_time,
     #                                                        frags)
-    # properties = ('localhost', 'farcry', None, None)
     # print(insert_match_to_postgresql(properties, start_time, end_time,
     #                                  game_mode, map_name, frags))
 
