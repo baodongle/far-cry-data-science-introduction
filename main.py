@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import pprint
 from csv import writer
 from datetime import datetime, timedelta, timezone
 from logging import basicConfig, DEBUG, error, warning
@@ -103,7 +102,6 @@ def parse_log_start_time(log_data: str) -> datetime:
         return start_time
     except (ValueError, LookupError) as e:
         error(e, exc_info=True)
-        raise
 
 
 # Waypoint 4:
@@ -220,7 +218,6 @@ def _parse_start_time(data: str, start: datetime) -> datetime:
             start_time += timedelta(hours=1)
         return start_time
     warning("Something occurred with the data!")
-    raise
 
 
 def _parse_end_time(data: str, start: datetime) -> datetime:
@@ -244,7 +241,6 @@ def _parse_end_time(data: str, start: datetime) -> datetime:
             end_time += timedelta(hours=1)
         return end_time
     warning("Something occurred with the data!")
-    raise
 
 
 # Waypoint 9:
@@ -437,17 +433,17 @@ def calculate_serial_killers(frags: List[Tuple[datetime, Any]]) \
     return _get_longest_series(serial_killers)
 
 
-# Waypoint 53:
+# Waypoint 54:
 def calculate_serial_losers(frags: List[Tuple[datetime, Any]]) \
         -> Dict[str, List[Tuple[datetime, str, str]]]:
-    """Determine Serial Killers.
+    """Determine Serial Losers.
 
     Args:
         frags: A list of frags.
 
-    Returns: A dictionary of killers with their longest kill series, where the
+    Returns: a dictionary of killers with their longest death series, where the
              key corresponds to the name of a player and the value corresponds
-             to a list of frag times which contain the player's longest series.
+             to a list of frag times of the player's longest series.
 
     """
     serial_losers = {}
@@ -459,7 +455,6 @@ def calculate_serial_losers(frags: List[Tuple[datetime, Any]]) \
             serial_losers.setdefault(frag[2], [[]])[-1] \
                 .append((frag[0], frag[1], frag[3]))
             serial_losers.setdefault(frag[1], []).append([])
-    pprint.pprint(serial_losers)
     return _get_longest_series(serial_losers)
 
 
@@ -495,10 +490,12 @@ def main() -> None:
     #     start_time, end_time = parse_match_start_and_end_times(
     #         log_data, log_start_time, frags)
     #     if start_time and end_time:
-    #         print(str(start_time), str(end_time))
-    #         write_frag_csv_file('./logs/log04.csv', frags)
-    #         print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
-    #                                      game_mode, map_name, frags))
+    #         insert_match_to_postgresql(properties, start_time, end_time,
+    #                                    game_mode, map_name, frags)
+    # print(str(start_time), str(end_time))
+    # write_frag_csv_file('./logs/log04.csv', frags)
+    # print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
+    #                              game_mode, map_name, frags))
     log_data = read_log_file('./logs/log08.txt')
     # log_start_time = parse_log_start_time(log_data)
     # game_mode, map_name = parse_match_mode_and_map(log_data)
