@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+import pprint
 from csv import writer
 from datetime import datetime, timedelta, timezone
 from logging import basicConfig, DEBUG, error, warning
+from os.path import expanduser
 from re import compile as re_compile, findall, M, search
-from sqlite3 import connect as sqlite_connect, Connection, \
-    DatabaseError as sqlite_DatabaseError
+from sqlite3 import connect as sqlite_connect, \
+    Connection as sqlite_Connection, DatabaseError as sqlite_DatabaseError
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from psycopg2 import connect as pg_connect, DatabaseError as pg_DatabaseError
@@ -69,7 +71,7 @@ def read_log_file(log_file_pathname: Any) -> str:
 
     """
     try:
-        with open(log_file_pathname) as f:
+        with open(expanduser(log_file_pathname)) as f:
             return f.read()
     except OSError as e:
         error(e, exc_info=True)
@@ -92,7 +94,7 @@ def parse_log_start_time(log_data: str) -> datetime:
             start_time = datetime.strptime(start_time_log.group(1),
                                            '%A, %B %d, %Y %H:%M:%S')
         else:
-            warning("Something occurred with the log file!")
+            warning("Can't get start time from the log file!")
             raise
         timezone_log = search(TIME_ZONE_PATTERN, log_data)
         if timezone_log:
@@ -120,7 +122,7 @@ def parse_match_mode_and_map(log_data: str) -> Sequence[str]:
     found = search(LOADING_LEVEL_PATTERN, log_data, M)
     if found:
         return found.groups()[::-1]
-    warning("Something occurred with the log file!")
+    warning("Can't get match mode and map from the log file!")
     return '', ''
 
 
@@ -256,8 +258,8 @@ def write_frag_csv_file(log_file_pathname: Any,
 
     """
     try:
-        with open(log_file_pathname, 'w') as f:
-            csv_writer = writer(f, lineterminator='\n')
+        with open(expanduser(log_file_pathname), 'w') as f:
+            csv_writer = writer(f)
             csv_writer.writerows(frags)
     except OSError as e:
         error(e, exc_info=True)
@@ -293,11 +295,11 @@ def insert_match_to_sqlite(file_pathname: Any, start_time: datetime,
             return cur.lastrowid
     except sqlite_DatabaseError as e:
         error(e, exc_info=True)
-    return 0
+        return 0
 
 
 # Waypoint 26:
-def insert_frags_to_sqlite(connection: Connection, match_id: int,
+def insert_frags_to_sqlite(connection: sqlite_Connection, match_id: int,
                            frags: List[Tuple[datetime, Any]]) -> None:
     """Insert Match Frags into SQLite.
 
@@ -373,33 +375,47 @@ def insert_match_to_postgresql(properties: Sequence[Optional[str]],
         with pg_connect(connection_string) as conn:
             # Open a cursor to perform database operations
             with conn.cursor() as curs:
-                # inserts a new record into the table `match`
+                # Inserts a new record into the table `match`:
                 curs.execute("""INSERT INTO match (start_time, end_time, 
                 game_mode, map_name) VALUES (%s, %s, %s, %s)
                 RETURNING match_id""",
                              (start_time, end_time, game_mode, map_name))
                 match_id = curs.fetchone()[0]
                 if match_id:
-                    # Inserts all the frags into the table `match_frag`
-                    for frag in frags:
-                        if len(frag) == 2:
-                            curs.execute("""INSERT INTO match_frag (match_id,
-                            frag_time, killer_name) VALUES (%s, %s, %s)""",
-                                         (match_id, *frag))
-                        if len(frag) == 4:
-                            curs.execute("""INSERT INTO match_frag (match_id, 
-                            frag_time, killer_name, victim_name, weapon_code)
-                             VALUES (%s, %s, %s, %s, %s)""", (match_id, *frag))
-                    return match_id
-                return ''
+                    insert_frags_to_postgresql(conn, match_id, frags)
+                return match_id
     except (pg_DatabaseError, TypeError) as exc:
         error("{}: {}".format(exc.__class__.__name__, exc))
         raise
 
 
+def insert_frags_to_postgresql(connection: pg_connect, match_id: str,
+                               frags: List[Tuple[datetime, Any]]) -> None:
+    """Insert Match Frags into SQLite.
+
+     This function inserts new records into the table match_frag.
+
+    Args:
+        connection: A sqlite3 Connection object.
+        match_id: The identifier of a match.
+        frags: A list of frags.
+
+    """
+    curs = connection.cursor()
+    for frag in frags:
+        if len(frag) == 2:
+            curs.execute(
+                """INSERT INTO match_frag (match_id, frag_time, killer_name) 
+                VALUES (%s, %s, %s)""", (match_id, *frag))
+        if len(frag) == 4:
+            curs.execute("""INSERT INTO match_frag (match_id, frag_time, 
+            killer_name, victim_name, weapon_code)
+            VALUES (%s, %s, %s, %s, %s)""", (match_id, *frag))
+
+
 # Waypoint 53:
 def calculate_serial_killers(frags: List[Tuple[datetime, Any]]) \
-        -> Dict[str, Sequence[str]]:
+        -> Dict[str, List[Tuple[datetime, str, str]]]:
     """Determine Serial Killers.
 
     Args:
@@ -410,7 +426,56 @@ def calculate_serial_killers(frags: List[Tuple[datetime, Any]]) \
              to a list of frag times which contain the player's longest series.
 
     """
+    serial_killers = {}
+    for frag in frags:
+        if len(frag) == 2:
+            serial_killers.setdefault(frag[1], []).append([])
+        if len(frag) == 4:
+            serial_killers.setdefault(frag[1], [[]])[-1].append(
+                (frag[0], frag[2], frag[3]))
+            serial_killers.setdefault(frag[2], []).append([])
+    return _get_longest_series(serial_killers)
 
+
+# Waypoint 53:
+def calculate_serial_losers(frags: List[Tuple[datetime, Any]]) \
+        -> Dict[str, List[Tuple[datetime, str, str]]]:
+    """Determine Serial Killers.
+
+    Args:
+        frags: A list of frags.
+
+    Returns: A dictionary of killers with their longest kill series, where the
+             key corresponds to the name of a player and the value corresponds
+             to a list of frag times which contain the player's longest series.
+
+    """
+    serial_losers = {}
+    for frag in frags:
+        if len(frag) == 2:
+            serial_losers.setdefault(frag[1], [[]])[-1] \
+                .append((frag[0], None, None))
+        if len(frag) == 4:
+            serial_losers.setdefault(frag[2], [[]])[-1] \
+                .append((frag[0], frag[1], frag[3]))
+            serial_losers.setdefault(frag[1], []).append([])
+    pprint.pprint(serial_losers)
+    return _get_longest_series(serial_losers)
+
+
+def _get_longest_series(dictionary: Dict) -> Dict:
+    """Find the longest streak of players.
+
+    Args:
+        dictionary: A dictionary of players with their series.
+
+    Returns: A dictionary of players with their longest series.
+
+    """
+    tmp_dict = dictionary.copy()
+    for player, series in tmp_dict.items():
+        tmp_dict[player] = max(series, key=len)
+    return tmp_dict
 
 
 def main() -> None:
@@ -419,36 +484,42 @@ def main() -> None:
     basicConfig(level=DEBUG,
                 format="%(levelname)s: %(funcName)s():%(lineno)i: %(message)s")
     # Running:
-    properties = ('localhost', 'farcry', None, None)
-    files = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09',
-             '10', '11']
-    for f in files:
-        log_data = read_log_file('./logs/log' + f + '.txt')
-        log_start_time = parse_log_start_time(log_data)
-        game_mode, map_name = parse_match_mode_and_map(log_data)
-        frags = parse_frags(log_data)
-        # prettified_frags = prettify_frags(frags)
-        # print('\n'.join(prettified_frags))
-        start_time, end_time = parse_match_start_and_end_times(
-            log_data, log_start_time, frags)
-        if start_time and end_time:
-            # print(str(start_time), str(end_time))
-            # write_frag_csv_file('./logs/log04.csv', frags)
-            # print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
-            #                              game_mode, map_name, frags))
-            print(insert_match_to_postgresql(properties, start_time, end_time,
-                                             game_mode, map_name, frags))
-    # log_data = read_log_file('./logs/log01.txt')
+    # properties = ('localhost', 'farcry', None, None)
+    # files = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09',
+    #          '10', '11']
+    # for f in files:
+    #     log_data = read_log_file('./logs/log' + f + '.txt')
+    #     log_start_time = parse_log_start_time(log_data)
+    #     game_mode, map_name = parse_match_mode_and_map(log_data)
+    #     frags = parse_frags(log_data)
+    #     start_time, end_time = parse_match_start_and_end_times(
+    #         log_data, log_start_time, frags)
+    #     if start_time and end_time:
+    #         print(str(start_time), str(end_time))
+    #         write_frag_csv_file('./logs/log04.csv', frags)
+    #         print(insert_match_to_sqlite('./farcry.db', start_time, end_time,
+    #                                      game_mode, map_name, frags))
+    log_data = read_log_file('./logs/log08.txt')
     # log_start_time = parse_log_start_time(log_data)
     # game_mode, map_name = parse_match_mode_and_map(log_data)
-    # frags = parse_frags(log_data)
-    # # prettified_frags = prettify_frags(frags)
-    # # print('\n'.join(prettified_frags))
+    frags = parse_frags(log_data)
+    # prettified_frags = prettify_frags(frags)
+    # print('\n'.join(prettified_frags))
     # start_time, end_time = parse_match_start_and_end_times(log_data,
     #                                                        log_start_time,
     #                                                        frags)
     # print(insert_match_to_postgresql(properties, start_time, end_time,
     #                                  game_mode, map_name, frags))
+    # serial_killers = calculate_serial_killers(frags)
+    # for player_name, kill_series in serial_killers.items():
+    #     print('[%s]' % player_name)
+    #     print('\n'.join([', '.join(([str(e) for e in kill]))
+    #                      for kill in kill_series]))
+    serial_losers = calculate_serial_losers(frags)
+    for player_name, death_series in serial_losers.items():
+        print('[%s]' % player_name)
+        print('\n'.join([', '.join(([str(e) for e in death]))
+                         for death in death_series]))
 
 
 if __name__ == '__main__':
